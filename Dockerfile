@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 RUN apt-get update && \
     apt-get install -y \
@@ -13,8 +13,11 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Python dependencies
-COPY requirements.txt .
-COPY main.py .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip
+COPY requirements.txt . 
+RUN pip install -r requirements.txt
 
-CMD ["/bin/python3", "main.py"]
+COPY main.py .
+COPY lib lib/
+
+CMD ["python3", "main.py"]
