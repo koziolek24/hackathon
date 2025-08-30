@@ -14,8 +14,6 @@ class Round:
 
 
     def bidding_run(self):
-        # wszyscy mają minimum jedną akcję
-        # wszyscy postawili tyle samo albo foldowali
         while True:
             perspective = Perspective([], 0, [])
             for player in self.players:
@@ -30,8 +28,14 @@ class Round:
                 perspective.stakes += player.raise_amount
                 if len(perspective) > len(self.players):
                     perspective.remove_first_action()
+            # check if this condition is correct
             if all(action.command_type in perspective.action_log for action in self.players if action.command_type == Command.FOLD or all(bet == self.bets[0] for bet in self.bets)):
                 break
 
     def evaluateRound(self):
-        pass
+        if self.round_number < 4:
+            self.bidding_run()
+        else:
+            pass
+            #TODO Maciek
+            # Ogarnij ewaluację użwając tych funkcji z pokera i playera
