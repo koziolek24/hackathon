@@ -92,6 +92,46 @@ class HandEvaluation:
         
         return False  # Hands are equal
 
+    def __str__(self):
+        return f"{self.rank.value}{self.suit.value}"
+
+    def __repr__(self):
+        return self.__str__()
+
+class HandRank(Enum):
+    HIGH_CARD = 1
+    PAIR = 2
+    TWO_PAIR = 3
+    THREE_OF_A_KIND = 4
+    STRAIGHT = 5
+    FLUSH = 6
+    FULL_HOUSE = 7
+    FOUR_OF_A_KIND = 8
+    STRAIGHT_FLUSH = 9
+    ROYAL_FLUSH = 10
+
+class HandEvaluation:
+    def __init__(self, hand_rank: HandRank, value_cards: list, kicker_cards: list = None):
+        self.hand_rank = hand_rank
+        self.value_cards = value_cards  # Cards that form the hand (e.g., the pair, three of a kind)
+        self.kicker_cards = kicker_cards or []  # Remaining cards for tiebreaking
+
+    def __lt__(self, other):
+        if self.hand_rank.value != other.hand_rank.value:
+            return self.hand_rank.value < other.hand_rank.value
+
+        # Compare value cards first
+        for my_card, other_card in zip(self.value_cards, other.value_cards):
+            if my_card != other_card:
+                return my_card < other_card
+
+        # Compare kickers
+        for my_kicker, other_kicker in zip(self.kicker_cards, other.kicker_cards):
+            if my_kicker != other_kicker:
+                return my_kicker < other_kicker
+
+        return False  # Hands are equal
+
 class Perspective:
     def __init__(self, stack: list[Card], stakes: list[int], command_log: list[Command]):
         self.stack = stack
