@@ -1,12 +1,15 @@
 from typing import List
 from collections import Counter
 from itertools import combinations
+import logging
 
 import numpy as np
 
 from .Player import (
     Card, CardRank, CardSuit, Hand, HandRank, HandEvaluation, Player
 )
+
+log = logging.getLogger(__name__)
 
 
 class Poker:
@@ -24,6 +27,7 @@ class Poker:
         self._available_deck = [Card(rank, suit) for rank in CardRank for suit in CardSuit]
         np.random.shuffle(self._available_deck)
         self._community_cards = []
+        log.debug("Talia zainicjalizowana i potasowana. Liczba kart: %d", len(self._available_deck))
 
     def dealCards(self):
         def drawCard():
@@ -33,17 +37,25 @@ class Poker:
 
         for player in self._players:
             player.setHand(Hand([drawCard() for _ in range(2)]))
+            log.debug("Rozdano %s: %s", player.name, player.hand.cards)
 
     def burn(self, n=1):
+        burned = []
         for _ in range(n):
             if self._available_deck:
-                self._available_deck.pop()
+                burned.append(self._available_deck.pop())
+        if burned:
+            log.info("Spalono %d kart: %s", len(burned), burned)
 
     def addCards(self, num_cards=1):
+        added = []
         for _ in range(num_cards):
             if not self._available_deck:
                 raise ValueError("Not enough cards in deck")
-            self._community_cards.append(self._available_deck.pop())
+            card = self._available_deck.pop()
+            self._community_cards.append(card)
+            added.append(card)
+        log.info("Dokryto %d kart wspólnych: %s | Board: %s", num_cards, added, self._community_cards)
 
     def getCards(self):
         return list(self._community_cards)
