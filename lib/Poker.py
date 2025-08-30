@@ -3,7 +3,7 @@ import numpy as np
 from collections import Counter
 from itertools import combinations
 
-class Game:
+class Poker:
     def __init__(self):
         self._deck = []
         self._available_deck = []
