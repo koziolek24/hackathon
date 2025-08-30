@@ -133,10 +133,19 @@ class HandEvaluation:
         return False  # Hands are equal
 
 class Perspective:
-    def __init__(self, stack: list[Card], stakes: list[int], command_log: list[Command]):
+    def __init__(self, stack: list[Card], stakes: int, action_log: list[Action]):
         self.stack = stack
         self.stakes = stakes
-        self.command_log = command_log
+        self.action_log = action_log
+
+    def __len__(self):
+        return len(self.action_log)
+
+    def add_action(self, action: Action):
+        self.action_log.append(action)
+
+    def remove_first_action(self):
+        self.action_log = self.action_log[1:]
 
 class Hand:
     def __init__(self, cards: list[Card]):
