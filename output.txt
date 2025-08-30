@@ -1,0 +1,475 @@
+==== ./main.py ====
+from lib.Player import Player, Perspective
+from lib.Poker import Poker
+from lib.Round import Round
+
+if __name__ == "__main__":
+    # Players creation
+    p1 = Player(name="Alice", history=[], money=1000, hand=None, perspective=Perspective([], 0, []))
+    p2 = Player(name="Bob", history=[], money=1000, hand=None, perspective=Perspective([], 0, []))
+    players = [p1, p2]
+
+    # Poker init
+    poker = Poker(players)
+    poker.initializeDeck()
+    poker.dealCards()
+
+    # First round
+    rnd = Round(poker, players, small_blind=10, big_blind=20)
+
+    # Preflop
+    rnd.bidding_run()
+
+    # Flop
+    poker.burn(1)
+    poker.addCards(3)
+    rnd.bidding_run()
+
+    # Turn
+    poker.burn(1)
+    poker.addCards(1)
+    rnd.bidding_run()
+
+    # River
+    poker.burn(1)
+    poker.addCards(1)
+    rnd.bidding_run()
+
+    # Showdown
+    evals = []
+    for pl in players:
+        he = poker.evaluateHand(pl.hand)
+        evals.append((pl, he))
+        print(f"{pl.name} hand: {pl.hand.cards} | best: {he}")
+
+    winner = max(evals, key=lambda t: t[1].key())
+    print(f"\nWinner: {winner[0].name} with {winner[1].hand_rank.name}")
+
+
+==== ./skrypt.py ====
+import os
+
+def save_files_content_to_txt(root_folder, output_file):
+    """Rekurencyjnie odczytuje pliki .c, .h i MAKEFILE w folderach
+    i zapisuje ich treść do pliku tekstowego."""
+    with open(output_file, 'w', encoding='utf-8') as outfile:
+        for root, _, files in os.walk(root_folder):
+            for file in files:
+                # Sprawdź rozszerzenia plików i nazwę MAKEFILE
+                if file.endswith(('.py')) or file.upper() == 'MAKEFILE':
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as infile:
+                            outfile.write(f"==== {file_path} ====\n")
+                            outfile.write(infile.read())
+                            outfile.write("\n\n")
+                    except Exception as e:
+                        print(f"Nie udało się odczytać pliku {file_path}: {e}")
+
+if __name__ == "__main__":
+    # Zmień 'input_folder' na folder, który chcesz przeszukać
+    input_folder = "./"
+    output_file = "output.txt"
+    save_files_content_to_txt(input_folder, output_file)
+    print(f"Zawartość plików została zapisana do {output_file}")
+
+==== ./lib\Game.py ====
+from Player import Player, Perspective, Hand, RoundResult
+from Card import Card
+from typing import List, Callable
+from Poker import Poker
+
+
+class Game:
+    def __init__(self, player_factories: List[Callable[[], Player]], pot_per_player: int):
+        self.pot_per_player = pot_per_player
+        self.player_factories = player_factories
+        self.active_players = list(range(len(player_factories)))
+        self.deck = []
+
+    def start_round(self, player_amount):
+        for i in player_amount:
+            self.add_player(Player(f"Player {i}"))
+        self.deck.shuffle()
+        self.deal_cards()
+        self.betting_round()
+
+    def deal_cards(self):
+        for player in self.players:
+            player.hand.add_card(self.deck.draw_card())
+            player.hand.add_card(self.deck.draw_card())
+
+    def reveal_community_cards(self, amount):
+        self.community_cards = []
+        for _ in range(amount):
+            self.community_cards.append(self.deck.draw_card())
+
+    def betting_round(self):
+        for player in self.players:
+            player_bet = player.make_bet()
+            self.pot += player_bet
+
+    def end_round(self):
+        self.showdown()
+        self.reset()
+
+    def showdown(self):
+        # Determine the winner and distribute the pot
+        pass
+
+    def reset(self):
+        self.deck = Deck()
+        self.pot = 0
+        for player in self.players:
+            player.hand.clear()
+
+==== ./lib\Player.py ====
+from enum import Enum
+from typing import List
+
+
+class Command(Enum):
+    FOLD = "fold"
+    CALL = "call"
+    RAISE = "raise"
+    ALL_IN = "all_in"
+
+
+class Action:
+    def __init__(self, command_type: Command, raise_amount: int = 0):
+        self.command_type = command_type
+        self.raise_amount = raise_amount
+
+    def __repr__(self):
+        return f"Action({self.command_type.name}, {self.raise_amount})"
+
+
+class PlayerType(Enum):
+    SMALL_BLIND = "small_blind"
+    BIG_BLIND = "big_blind"
+    REGULAR = "regular"
+
+
+class CardRank(Enum):
+    TWO = "2"
+    THREE = "3"
+    FOUR = "4"
+    FIVE = "5"
+    SIX = "6"
+    SEVEN = "7"
+    EIGHT = "8"
+    NINE = "9"
+    TEN = "10"
+    JACK = "J"
+    QUEEN = "Q"
+    KING = "K"
+    ACE = "A"
+
+    @property
+    def pips(self) -> int:
+        mapping = {
+            CardRank.TWO: 2, CardRank.THREE: 3, CardRank.FOUR: 4, CardRank.FIVE: 5,
+            CardRank.SIX: 6, CardRank.SEVEN: 7, CardRank.EIGHT: 8, CardRank.NINE: 9,
+            CardRank.TEN: 10, CardRank.JACK: 11, CardRank.QUEEN: 12, CardRank.KING: 13,
+            CardRank.ACE: 14
+        }
+        return mapping[self]
+
+
+class CardSuit(Enum):
+    HEARTS = "♥"
+    DIAMONDS = "♦"
+    CLUBS = "♣"
+    SPADES = "♠"
+
+
+class Card:
+    def __init__(self, rank: CardRank, suit: CardSuit):
+        self.rank = rank
+        self.suit = suit
+
+    def __repr__(self):
+        return f"{self.rank.value}{self.suit.value}"
+
+
+class HandRank(Enum):
+    HIGH_CARD = 1
+    PAIR = 2
+    TWO_PAIR = 3
+    THREE_OF_A_KIND = 4
+    STRAIGHT = 5
+    FLUSH = 6
+    FULL_HOUSE = 7
+    FOUR_OF_A_KIND = 8
+    STRAIGHT_FLUSH = 9
+    ROYAL_FLUSH = 10
+
+
+class HandEvaluation:
+    """
+    value_cards: lista wartości (int) istotnych dla układu
+    kicker_cards: pozostałe „kikery” malejąco
+    """
+    def __init__(self, hand_rank: HandRank, value_cards: List[int], kicker_cards: List[int] | None = None):
+        self.hand_rank = hand_rank
+        self.value_cards = value_cards
+        self.kicker_cards = kicker_cards or []
+
+    def key(self):
+        return (self.hand_rank.value, self.value_cards, self.kicker_cards)
+
+    def __lt__(self, other: "HandEvaluation"):
+        return self.key() < other.key()
+
+    def __repr__(self):
+        return f"HandEvaluation({self.hand_rank.name}, {self.value_cards}, {self.kicker_cards})"
+
+
+class Perspective:
+    def __init__(self, stack: List[Card], stakes: int, action_log: List[Action]):
+        self.stack = stack
+        self.stakes = stakes
+        self.action_log = action_log
+
+    def __len__(self):
+        return len(self.action_log)
+
+    def add_action(self, action: Action):
+        self.action_log.append(action)
+
+    def remove_first_action(self):
+        if self.action_log:
+            self.action_log = self.action_log[1:]
+
+
+class Hand:
+    def __init__(self, cards: List[Card]):
+        self.cards = cards
+
+    def __repr__(self):
+        return f"Hand({self.cards})"
+
+
+class RoundResult:
+    def __init__(self, winner: str, pot: int, hands: List[Hand], isCardReset: bool = False):
+        self.winner = winner
+        self.pot = pot
+        self.hands = hands
+        self.isCardReset = isCardReset
+
+
+class Player:
+    def __init__(self, name: str, history: List[RoundResult], money: int, hand: Hand | None, perspective: Perspective):
+        self.name = name
+        self.history = history
+        self.money = money
+        self.hand = hand
+        self.perspective_log: List[Perspective] = [perspective]
+
+    def setHand(self, hand: Hand):
+        self.hand = hand
+
+    def accept(self, perspective: Perspective) -> Action:
+        self.perspective_log.append(perspective)
+        return self.play()
+
+    def play(self) -> Action:
+        # Placeholder, bot będzie tutaj grał
+        return Action(Command.CALL)
+
+
+==== ./lib\Poker.py ====
+from typing import List
+from collections import Counter
+from itertools import combinations
+
+import numpy as np
+
+from .Player import (
+    Card, CardRank, CardSuit, Hand, HandRank, HandEvaluation, Player
+)
+
+
+class Poker:
+    def __init__(self, players: List[Player]):
+        self._available_deck: List[Card] = []
+        self._initialized = False
+        self._community_cards: List[Card] = []
+        self._players = players
+
+    def isInitialized(self):
+        return self._initialized
+
+    def initializeDeck(self):
+        self._initialized = True
+        self._available_deck = [Card(rank, suit) for rank in CardRank for suit in CardSuit]
+        np.random.shuffle(self._available_deck)
+        self._community_cards = []
+
+    def dealCards(self):
+        def drawCard():
+            if not self._available_deck:
+                raise ValueError("No cards left in the deck")
+            return self._available_deck.pop()
+
+        for player in self._players:
+            player.setHand(Hand([drawCard() for _ in range(2)]))
+
+    def burn(self, n=1):
+        for _ in range(n):
+            if self._available_deck:
+                self._available_deck.pop()
+
+    def addCards(self, num_cards=1):
+        for _ in range(num_cards):
+            if not self._available_deck:
+                raise ValueError("Not enough cards in deck")
+            self._community_cards.append(self._available_deck.pop())
+
+    def getCards(self):
+        return list(self._community_cards)
+
+    def isFull(self):
+        return len(self._community_cards) >= 5
+
+    def evaluateHand(self, player_hand: Hand) -> HandEvaluation:
+        all_cards = player_hand.cards + self._community_cards
+
+        if len(all_cards) < 5:
+            raise ValueError("Need at least 5 cards to evaluate hand")
+
+        best_hand = None
+        for five_cards in combinations(all_cards, 5):
+            hand_eval = self._evaluate_five_cards(list(five_cards))
+            if best_hand is None or best_hand < hand_eval:
+                best_hand = hand_eval
+
+        return best_hand
+
+    def _evaluate_five_cards(self, cards: List[Card]) -> HandEvaluation:
+        ranks = [c.rank.pips for c in cards]
+        suits = [c.suit for c in cards]
+
+        rank_counts = Counter(ranks)
+        suit_counts = Counter(suits)
+
+        sorted_ranks = sorted(ranks, reverse=True)
+        is_flush = len(suit_counts) == 1
+        straight_high = self._straight_high(sorted_ranks)
+
+        # Royal / Straight Flush
+        if is_flush and straight_high is not None:
+            if straight_high == 14 and set(sorted_ranks) == {10, 11, 12, 13, 14}:
+                return HandEvaluation(HandRank.ROYAL_FLUSH, [14, 13, 12, 11, 10], [])
+            return HandEvaluation(
+                HandRank.STRAIGHT_FLUSH,
+                [straight_high, straight_high - 1, straight_high - 2, straight_high - 3, straight_high - 4],
+                []
+            )
+
+        # Four of a kind
+        if 4 in rank_counts.values():
+            four = max([r for r, cnt in rank_counts.items() if cnt == 4])
+            kicker = max([r for r, cnt in rank_counts.items() if cnt == 1])
+            return HandEvaluation(HandRank.FOUR_OF_A_KIND, [four], [kicker])
+
+        # Full house
+        if 3 in rank_counts.values() and 2 in rank_counts.values():
+            three = max([r for r, cnt in rank_counts.items() if cnt == 3])
+            pair = max([r for r, cnt in rank_counts.items() if cnt == 2])
+            return HandEvaluation(HandRank.FULL_HOUSE, [three, pair], [])
+
+        # Flush
+        if is_flush:
+            return HandEvaluation(HandRank.FLUSH, sorted_ranks, [])
+
+        # Straight
+        if straight_high is not None:
+            return HandEvaluation(
+                HandRank.STRAIGHT,
+                [straight_high, straight_high - 1, straight_high - 2, straight_high - 3, straight_high - 4],
+                []
+            )
+
+        # Three of a kind
+        if 3 in rank_counts.values():
+            three = max([r for r, cnt in rank_counts.items() if cnt == 3])
+            kickers = sorted([r for r, cnt in rank_counts.items() if cnt == 1], reverse=True)
+            return HandEvaluation(HandRank.THREE_OF_A_KIND, [three], kickers)
+
+        # Two pair
+        pairs = sorted([r for r, cnt in rank_counts.items() if cnt == 2], reverse=True)
+        if len(pairs) >= 2:
+            pairs = pairs[:2]
+            kicker = max([r for r, cnt in rank_counts.items() if cnt == 1])
+            return HandEvaluation(HandRank.TWO_PAIR, pairs, [kicker])
+
+        # Pair
+        if 2 in rank_counts.values():
+            pair = max([r for r, cnt in rank_counts.items() if cnt == 2])
+            kickers = sorted([r for r, cnt in rank_counts.items() if cnt == 1], reverse=True)
+            return HandEvaluation(HandRank.PAIR, [pair], kickers)
+
+        # High card
+        return HandEvaluation(HandRank.HIGH_CARD, [sorted_ranks[0]], sorted_ranks[1:])
+
+    @staticmethod
+    def _straight_high(sorted_desc_ranks: List[int]) -> int | None:
+        """
+        Zwraca najwyższą kartę strita w 5 kartach lub None.
+        Obsługuje wheel (A-2-3-4-5): zwraca 5 jako high.
+        """
+        unique = sorted(set(sorted_desc_ranks), reverse=True)
+        if len(unique) != 5:
+            return None
+
+        if all(unique[i] - 1 == unique[i + 1] for i in range(4)):
+            return unique[0]
+
+        if set(unique) == {14, 5, 4, 3, 2}:
+            return 5
+        return None
+
+
+==== ./lib\Round.py ====
+from typing import List
+
+from .Player import Player, Perspective, Command, Action
+from .Poker import Poker
+
+
+class Round:
+    def __init__(self, poker: Poker, players: List[Player], small_blind: int = 10, big_blind: int = 20):
+        self.poker = poker
+        self.players = players
+        self.round_number = 1
+        self.bets = [0 for _ in players]
+        self.max_bet = 0
+        self.small_blind = small_blind
+        self.big_blind = big_blind
+
+    def bidding_run(self):
+        perspective = Perspective(stack=[], stakes=sum(self.bets), action_log=[])
+
+        for idx, player in enumerate(self.players):
+            action_done: Action = player.accept(perspective)
+            perspective.add_action(action_done)
+
+            if action_done.command_type == Command.FOLD:
+                # w tej wersji fold usuwa playera z rundy
+                continue
+            elif action_done.command_type in (Command.CALL, Command.ALL_IN):
+                to_call = self.max_bet - self.bets[idx]
+                if to_call < 0:
+                    to_call = 0
+                self.bets[idx] += to_call
+            elif action_done.command_type == Command.RAISE:
+                self.max_bet += action_done.raise_amount
+                self.bets[idx] = self.max_bet
+
+            perspective.stakes = sum(self.bets)
+
+
+==== ./lib\__init__.py ====
+
+

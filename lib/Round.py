@@ -1,41 +1,36 @@
-from Player import Card, CardRank, CardSuit, Hand, HandRank, HandEvaluation, Player, Perspective
-import numpy as np
-from collections import Counter
-from itertools import combinations
 from typing import List
 
+from .Player import Player, Perspective, Command, Action
+from .Poker import Poker
+
+
 class Round:
-    def __init__(self, poker: Poker, players: List[Player]):
+    def __init__(self, poker: Poker, players: List[Player], small_blind: int = 10, big_blind: int = 20):
         self.poker = poker
         self.players = players
-        self.roundNumber = 1
-        self.bets = []
+        self.round_number = 1
+        self.bets = [0 for _ in players]
         self.max_bet = 0
-
+        self.small_blind = small_blind
+        self.big_blind = big_blind
 
     def bidding_run(self):
-        while True:
-            perspective = Perspective([], 0, [])
-            for player in self.players:
-                action_done = player.accept(perspective)
-                # verify if action is valid
-                perspective.add_action(action_done)
-                if action_done == Command.RAISE:
-                    self.bets.append(player.raise_amount)
-                    self.max_bet = max(self.max_bet, player.raise_amount)
-                if action_done == Command.CALL:
-                    self.bets.append(self.max_bet)
-                perspective.stakes += player.raise_amount
-                if len(perspective) > len(self.players):
-                    perspective.remove_first_action()
-            # check if this condition is correct
-            if all(action.command_type in perspective.action_log for action in self.players if action.command_type == Command.FOLD or all(bet == self.bets[0] for bet in self.bets)):
-                break
+        perspective = Perspective(stack=[], stakes=sum(self.bets), action_log=[])
 
-    def evaluateRound(self):
-        if self.round_number < 4:
-            self.bidding_run()
-        else:
-            pass
-            #TODO Maciek
-            # Ogarnij ewaluację użwając tych funkcji z pokera i playera
+        for idx, player in enumerate(self.players):
+            action_done: Action = player.accept(perspective)
+            perspective.add_action(action_done)
+
+            if action_done.command_type == Command.FOLD:
+                # w tej wersji fold usuwa playera z rundy
+                continue
+            elif action_done.command_type in (Command.CALL, Command.ALL_IN):
+                to_call = self.max_bet - self.bets[idx]
+                if to_call < 0:
+                    to_call = 0
+                self.bets[idx] += to_call
+            elif action_done.command_type == Command.RAISE:
+                self.max_bet += action_done.raise_amount
+                self.bets[idx] = self.max_bet
+
+            perspective.stakes = sum(self.bets)
