@@ -30,7 +30,7 @@ class CardRank(Enum):
     QUEEN = "Q"
     KING = "K"
     ACE = "A"
-    
+
     @property
     def value(self):
         rank_values = {
@@ -51,10 +51,10 @@ class Card:
     def __init__(self, rank: CardRank, suit: CardSuit):
         self.rank = rank
         self.suit = suit
-    
+
     def __str__(self):
         return f"{self.rank.value}{self.suit.value}"
-    
+
     def __repr__(self):
         return self.__str__()
 
@@ -75,21 +75,21 @@ class HandEvaluation:
         self.hand_rank = hand_rank
         self.value_cards = value_cards  # Cards that form the hand (e.g., the pair, three of a kind)
         self.kicker_cards = kicker_cards or []  # Remaining cards for tiebreaking
-    
+
     def __lt__(self, other):
         if self.hand_rank.value != other.hand_rank.value:
             return self.hand_rank.value < other.hand_rank.value
-        
+
         # Compare value cards first
         for my_card, other_card in zip(self.value_cards, other.value_cards):
             if my_card != other_card:
                 return my_card < other_card
-        
+
         # Compare kickers
         for my_kicker, other_kicker in zip(self.kicker_cards, other.kicker_cards):
             if my_kicker != other_kicker:
                 return my_kicker < other_kicker
-        
+
         return False  # Hands are equal
 
     def __str__(self):
@@ -157,11 +157,14 @@ class Player:
         self.hand = hand
         self.perspective_log = []
         self.perspective_log.append(perspective)
-    
+
+    def setHand(self, hand: Hand):
+        self.hand = hand
+
     def accept(self, perspective: Perspective) -> Action:
         self.perspective_log.append(perspective)
         return self.play()
-    
+
     def play(self) -> Action:
         # Implement the logic for the player to make a move
         return Action(Command.CALL)
