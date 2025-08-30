@@ -99,11 +99,31 @@ class HandEvaluation:
         return f"HandEvaluation({self.hand_rank.name}, {self.value_cards}, {self.kicker_cards})"
 
 
+# lib/Player.py
+
 class Perspective:
-    def __init__(self, stack: List[Card], stakes: int, action_log: List[Action]):
+    def __init__(
+        self,
+        stack: List[Card],
+        stakes: int,
+        action_log: List[Action],
+        board: List["Card"] | None = None,
+        to_call: int = 0,
+        max_bet: int = 0,
+        min_raise: int = 0,
+        position: int = 0
+    ):
         self.stack = stack
         self.stakes = stakes
         self.action_log = action_log
+
+        self.board = board or []
+        ## Dodaję je teraz:
+        self.to_call = to_call           # how much the player needs to call
+        self.max_bet = max_bet           # current max bet
+        self.min_raise = min_raise       # minimum allowed raise
+        self.position = position         # player index
+
 
     def __len__(self):
         return len(self.action_log)
