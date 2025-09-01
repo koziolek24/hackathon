@@ -1,49 +1,276 @@
 ==== ./main.py ====
-from lib.Player import Player, Perspective
+from lib.Player import Perspective, Player
 from lib.Poker import Poker
 from lib.Round import Round
+from piwo1 import Piwo1
+import logging
+import os
+
+def setup_logging():
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, level_name, logging.INFO),
+        format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
 if __name__ == "__main__":
-    # Players creation
-    p1 = Player(name="Alice", history=[], money=1000, hand=None, perspective=Perspective([], 0, []))
-    p2 = Player(name="Bob", history=[], money=1000, hand=None, perspective=Perspective([], 0, []))
+    setup_logging()
+    log = logging.getLogger("main")
+
+    log.info("=== Start gry ===")
+
+    p1 = Piwo1(name="Piwo1_bot", history=[], money=1000, hand=None, perspective=Perspective([], 0, []))
+    p2 = Player(name="Tylko_call",   history=[], money=1000, hand=None, perspective=Perspective([], 0, []))
     players = [p1, p2]
 
     # Poker init
     poker = Poker(players)
     poker.initializeDeck()
     poker.dealCards()
+    log.info("Karty rozdane graczom (szczegóły rąk w DEBUG).")
 
     # First round
     rnd = Round(poker, players, small_blind=10, big_blind=20)
 
     # Preflop
+    log.info("— Preflop —")
     rnd.bidding_run()
 
     # Flop
+    log.info("— Flop —")
     poker.burn(1)
     poker.addCards(3)
     rnd.bidding_run()
 
     # Turn
+    log.info("— Turn —")
     poker.burn(1)
     poker.addCards(1)
     rnd.bidding_run()
 
     # River
+    log.info("— River —")
     poker.burn(1)
     poker.addCards(1)
     rnd.bidding_run()
 
     # Showdown
+    log.info("— Showdown —")
     evals = []
     for pl in players:
         he = poker.evaluateHand(pl.hand)
         evals.append((pl, he))
+        log.info(f"{pl.name} hand: {pl.hand.cards} | best: {he}")
         print(f"{pl.name} hand: {pl.hand.cards} | best: {he}")
 
     winner = max(evals, key=lambda t: t[1].key())
-    print(f"\nWinner: {winner[0].name} with {winner[1].hand_rank.name}")
+    msg = f"Winner: {winner[0].name} with {winner[1].hand_rank.name}"
+    log.info(msg)
+    print(f"\n{msg}")
+
+
+==== ./piwo1.py ====
+# piwo1.py
+import logging
+from typing import List
+from lib.Player import Player, Action, Command, Card, CardRank
+
+log = logging.getLogger(__name__)
+
+# ------- POMOCNICZE -------
+
+def _street(board_len: int) -> str:
+    if board_len == 0: return "preflop"
+    if board_len == 3: return "flop"
+    if board_len == 4: return "turn"
+    return "river"
+
+def _rank_counts(cards: List[Card]) -> dict[int, int]:
+    counts = {}
+    for c in cards:
+        counts[c.rank.pips] = counts.get(c.rank.pips, 0) + 1
+    return counts
+
+def _preflop_score(hole: List[Card]) -> int:
+    ## do ulepszenia
+    """Minimalna ocena startówki: para + wysokie karty + suited/connected."""
+    r1, r2 = hole[0].rank.pips, hole[1].rank.pips
+    suited = hole[0].suit == hole[1].suit
+    pair = r1 == r2
+    hi, lo = (r1, r2) if r1 >= r2 else (r2, r1)
+    connected = abs(r1 - r2) == 1
+
+    s = 0
+    if pair: s += 6 + (hi >= CardRank.TEN.pips)
+    if hi >= CardRank.ACE.pips: s += 3
+    if hi >= 13: s += 2
+    if lo >= 10: s += 1
+    if suited: s += 1
+    if connected: s += 1
+    return s
+
+def _postflop_tier(hole: List[Card], board: List[Card]) -> str:
+    """
+    'air' (brak pary), 'pair', 'top_pair' (w tym overpair), 'two_pair_plus' (2p+).
+    """
+    if not board:
+        return "air"
+
+    all_cards = hole + board
+    counts = _rank_counts(all_cards)
+
+    # trips+ -> two_pair_plus
+    if any(v >= 3 for v in counts.values()):
+        return "two_pair_plus"
+
+    # dwie różne pary wartości -> two_pair_plus
+    pair_vals = [r for r, v in counts.items() if v >= 2]
+    if len(pair_vals) >= 2:
+        return "two_pair_plus"
+
+    # jedna para: sprawdź top_pair/overpair
+    if pair_vals:
+        board_top = max(c.rank.pips for c in board)
+        hole_pair = hole[0].rank.pips == hole[1].rank.pips
+        overpair = hole_pair and (hole[0].rank.pips > board_top)
+        top_pair = any(c.rank.pips == board_top for c in hole)
+        if overpair or top_pair:
+            return "top_pair"
+        return "pair"
+
+    return "air"
+
+def _bet_delta_simple(street: str, min_raise: int) -> int:
+    """Stałe, czytelne rozmiary raisów (delta do max_bet)."""
+    table = {"flop": 20, "turn": 30, "river": 40}
+    return max(table.get(street, 20), min_raise)
+
+# --- NOWOŚĆ: wykrywanie flush draw (4 karty w kolorze) + semiblef ---
+def _has_flush_draw(hole: List[Card], board: List[Card]) -> bool:
+    """True, gdy mamy łącznie 4 karty w jednym kolorze i przynajmniej 1 nasza karta jest w tym kolorze."""
+    if len(board) < 3:
+        return False
+    suit_counts = {}
+    for c in hole + board:
+        suit_counts[c.suit] = suit_counts.get(c.suit, 0) + 1
+    for suit, cnt in suit_counts.items():
+        if cnt >= 4 and any(h.suit == suit for h in hole):
+            return True
+    return False
+
+# ------- BOT -------
+
+class Piwo1(Player):
+    """
+    Prosty, bazowy bot + jedna poprawka:
+    - Preflop: open/call/fold wg prostego score; vs raise -> 3-bet tylko top, inaczej call/fold.
+    - Postflop: value-only; bet para/top_pair/2p+, brak blefów...
+    - ... + NOWOŚĆ: jeśli mamy flush draw i 'air', gramy SEMIBLEF (mały bet) albo tani call vs bet.
+    """
+    _BB = 20  # zgodnie z Twoim main.py
+
+    def play(self) -> Action:
+        p = self.perspective_log[-1]
+        hole = self.hand.cards if self.hand else []
+        board = p.board
+        pot = p.stakes
+        to_call = p.to_call
+        min_raise = max(p.min_raise, self._BB)
+
+        st = _street(len(board))
+        log.debug("[Piwo1] %s | hole=%s | board=%s | pot=%d | to_call=%d | min_raise=%d",
+                  st, hole, board, pot, to_call, min_raise)
+
+        # -------- PRE-FLOP --------
+        if st == "preflop":
+            s = _preflop_score(hole)
+            log.debug("[Piwo1] Preflop score=%d", s)
+
+            if to_call == 0:
+                if s >= 5:
+                    a = Action(Command.RAISE, max(2 * self._BB, min_raise))
+                    log.info("[Piwo1] Preflop open-raise: %s", a)
+                    return a
+                elif s >= 3:
+                    a = Action(Command.CALL)
+                    log.info("[Piwo1] Preflop limp/check: %s", a)
+                    return a
+                else:
+                    log.info("[Piwo1] Preflop fold.")
+                    return Action(Command.FOLD)
+
+            if s >= 7:
+                a = Action(Command.RAISE, max(3 * self._BB, min_raise))
+                log.info("[Piwo1] Preflop 3-bet (value): %s", a)
+                return a
+            elif s >= 4:
+                a = Action(Command.CALL)
+                log.info("[Piwo1] Preflop call vs raise: %s", a)
+                return a
+            else:
+                log.info("[Piwo1] Preflop fold vs raise.")
+                return Action(Command.FOLD)
+
+        # -------- POST-FLOP --------
+        tier = _postflop_tier(hole, board)
+        has_fd = _has_flush_draw(hole, board)
+        log.debug("[Piwo1] Postflop tier=%s | flush_draw=%s", tier, has_fd)
+
+        # Nikt nie betował → możemy betować value; z 'air' tylko semiblef z flush drawem
+        if to_call == 0:
+            if tier == "air":
+                if has_fd and st in ("flop", "turn"):
+                    a = Action(Command.RAISE, _bet_delta_simple(st, min_raise))
+                    log.info("[Piwo1] %s semiblef (flush draw): %s", st, a)
+                    return a
+                log.info("[Piwo1] %s check (brak value).", st)
+                return Action(Command.CALL)  # check
+
+            if tier == "pair":
+                a = Action(Command.RAISE, _bet_delta_simple(st, min_raise))
+                log.info("[Piwo1] %s value bet (para): %s", st, a)
+                return a
+
+            if tier == "top_pair":
+                base = _bet_delta_simple(st, min_raise)
+                a = Action(Command.RAISE, max(base, int(1.5 * base)))
+                log.info("[Piwo1] %s value bet (top pair): %s", st, a)
+                return a
+
+            # two_pair_plus
+            base = _bet_delta_simple(st, min_raise)
+            a = Action(Command.RAISE, max(base, 2 * base))
+            log.info("[Piwo1] %s value bet (two pair+): %s", st, a)
+            return a
+
+        # Rywal betuje → reagujemy prosto; draw traktujemy jak „air+, ale z equity”
+        if tier == "air":
+            if has_fd and st in ("flop", "turn"):
+                # Tani call z drawem: nie płać za dużo (tu: do ~60% „puli” w Twojej metryce)
+                threshold = 0.6 * (pot + to_call)
+                if to_call <= threshold:
+                    log.info("[Piwo1] %s call (flush draw).", st)
+                    return Action(Command.CALL)
+            log.info("[Piwo1] %s fold vs bet (air).", st)
+            return Action(Command.FOLD)
+
+        if tier == "pair":
+            if st == "river":
+                log.info("[Piwo1] River fold (sama para bez top).")
+                return Action(Command.FOLD)
+            log.info("[Piwo1] %s call (para).", st)
+            return Action(Command.CALL)
+
+        if tier == "top_pair":
+            log.info("[Piwo1] %s call (top pair).", st)
+            return Action(Command.CALL)
+
+        # two_pair_plus: value-raise
+        base = _bet_delta_simple(st, min_raise)
+        a = Action(Command.RAISE, max(base, int(1.5 * base)))
+        log.info("[Piwo1] %s raise (two pair+): %s", st, a)
+        return a
 
 
 ==== ./skrypt.py ====
@@ -72,56 +299,6 @@ if __name__ == "__main__":
     output_file = "output.txt"
     save_files_content_to_txt(input_folder, output_file)
     print(f"Zawartość plików została zapisana do {output_file}")
-
-==== ./lib\Game.py ====
-from Player import Player, Perspective, Hand, RoundResult
-from Card import Card
-from typing import List, Callable
-from Poker import Poker
-
-
-class Game:
-    def __init__(self, player_factories: List[Callable[[], Player]], pot_per_player: int):
-        self.pot_per_player = pot_per_player
-        self.player_factories = player_factories
-        self.active_players = list(range(len(player_factories)))
-        self.deck = []
-
-    def start_round(self, player_amount):
-        for i in player_amount:
-            self.add_player(Player(f"Player {i}"))
-        self.deck.shuffle()
-        self.deal_cards()
-        self.betting_round()
-
-    def deal_cards(self):
-        for player in self.players:
-            player.hand.add_card(self.deck.draw_card())
-            player.hand.add_card(self.deck.draw_card())
-
-    def reveal_community_cards(self, amount):
-        self.community_cards = []
-        for _ in range(amount):
-            self.community_cards.append(self.deck.draw_card())
-
-    def betting_round(self):
-        for player in self.players:
-            player_bet = player.make_bet()
-            self.pot += player_bet
-
-    def end_round(self):
-        self.showdown()
-        self.reset()
-
-    def showdown(self):
-        # Determine the winner and distribute the pot
-        pass
-
-    def reset(self):
-        self.deck = Deck()
-        self.pot = 0
-        for player in self.players:
-            player.hand.clear()
 
 ==== ./lib\Player.py ====
 from enum import Enum
@@ -225,11 +402,31 @@ class HandEvaluation:
         return f"HandEvaluation({self.hand_rank.name}, {self.value_cards}, {self.kicker_cards})"
 
 
+# lib/Player.py
+
 class Perspective:
-    def __init__(self, stack: List[Card], stakes: int, action_log: List[Action]):
+    def __init__(
+        self,
+        stack: List[Card],
+        stakes: int,
+        action_log: List[Action],
+        board: List["Card"] | None = None,
+        to_call: int = 0,
+        max_bet: int = 0,
+        min_raise: int = 0,
+        position: int = 0
+    ):
         self.stack = stack
         self.stakes = stakes
         self.action_log = action_log
+
+        self.board = board or []
+        ## Dodaję je teraz:
+        self.to_call = to_call           # how much the player needs to call
+        self.max_bet = max_bet           # current max bet
+        self.min_raise = min_raise       # minimum allowed raise
+        self.position = position         # player index
+
 
     def __len__(self):
         return len(self.action_log)
@@ -282,12 +479,15 @@ class Player:
 from typing import List
 from collections import Counter
 from itertools import combinations
+import logging
 
 import numpy as np
 
 from .Player import (
     Card, CardRank, CardSuit, Hand, HandRank, HandEvaluation, Player
 )
+
+log = logging.getLogger(__name__)
 
 
 class Poker:
@@ -305,6 +505,7 @@ class Poker:
         self._available_deck = [Card(rank, suit) for rank in CardRank for suit in CardSuit]
         np.random.shuffle(self._available_deck)
         self._community_cards = []
+        log.debug("Talia zainicjalizowana i potasowana. Liczba kart: %d", len(self._available_deck))
 
     def dealCards(self):
         def drawCard():
@@ -314,17 +515,25 @@ class Poker:
 
         for player in self._players:
             player.setHand(Hand([drawCard() for _ in range(2)]))
+            log.debug("Rozdano %s: %s", player.name, player.hand.cards)
 
     def burn(self, n=1):
+        burned = []
         for _ in range(n):
             if self._available_deck:
-                self._available_deck.pop()
+                burned.append(self._available_deck.pop())
+        if burned:
+            log.info("Spalono %d kart: %s", len(burned), burned)
 
     def addCards(self, num_cards=1):
+        added = []
         for _ in range(num_cards):
             if not self._available_deck:
                 raise ValueError("Not enough cards in deck")
-            self._community_cards.append(self._available_deck.pop())
+            card = self._available_deck.pop()
+            self._community_cards.append(card)
+            added.append(card)
+        log.info("Dokryto %d kart wspólnych: %s | Board: %s", num_cards, added, self._community_cards)
 
     def getCards(self):
         return list(self._community_cards)
@@ -433,10 +642,12 @@ class Poker:
 
 ==== ./lib\Round.py ====
 from typing import List
+import logging
 
 from .Player import Player, Perspective, Command, Action
 from .Poker import Poker
 
+log = logging.getLogger(__name__)
 
 class Round:
     def __init__(self, poker: Poker, players: List[Player], small_blind: int = 10, big_blind: int = 20):
@@ -449,25 +660,67 @@ class Round:
         self.big_blind = big_blind
 
     def bidding_run(self):
-        perspective = Perspective(stack=[], stakes=sum(self.bets), action_log=[])
+        board = self.poker.getCards()
+        street = {0: "preflop", 3: "flop", 4: "turn"}.get(len(board), "river")
+
+        self.max_bet = 0
+        self.bets = [0 for _ in self.players]
+
+        if street == "preflop":
+            self.bets[0] = self.small_blind
+            self.bets[1] = self.big_blind
+            self.max_bet = self.big_blind
+            log.info("Post blinds: %s(SB)=%d, %s(BB)=%d",
+                     self.players[0].name, self.small_blind,
+                     self.players[1].name, self.big_blind)
+
+        log.info("Licytacja: %s | start: pot=%d, max_bet=%d", street, sum(self.bets), self.max_bet)
 
         for idx, player in enumerate(self.players):
-            action_done: Action = player.accept(perspective)
-            perspective.add_action(action_done)
+            pot = sum(self.bets)
+            board = self.poker.getCards()
+
+            to_call = self.max_bet - self.bets[idx]
+            if to_call < 0:
+                to_call = 0
+
+            min_raise = self.big_blind
+
+            persp = Perspective(
+                stack=[],
+                stakes=pot,
+                action_log=[],
+                board=board,
+                to_call=to_call,
+                max_bet=self.max_bet,
+                min_raise=min_raise,
+                position=idx
+            )
+
+            log.info("Gracz %s: to_call=%d, pot=%d, max_bet=%d, bets=%s, board=%s",
+                     player.name, to_call, pot, self.max_bet, self.bets, board)
+
+            action_done: Action = player.accept(persp)
+            log.info("Gracz %s zagrywa: %s", player.name, action_done)
 
             if action_done.command_type == Command.FOLD:
-                # w tej wersji fold usuwa playera z rundy
+                log.info("Gracz %s folduje (bez zmiany stawek).", player.name)
                 continue
             elif action_done.command_type in (Command.CALL, Command.ALL_IN):
-                to_call = self.max_bet - self.bets[idx]
-                if to_call < 0:
-                    to_call = 0
-                self.bets[idx] += to_call
+                to_call_now = self.max_bet - self.bets[idx]
+                if to_call_now < 0:
+                    to_call_now = 0
+                self.bets[idx] += to_call_now
+                log.info("CALL/ALL_IN: %s dopłaca %d -> bets=%s (max_bet=%d)",
+                         player.name, to_call_now, self.bets, self.max_bet)
             elif action_done.command_type == Command.RAISE:
                 self.max_bet += action_done.raise_amount
                 self.bets[idx] = self.max_bet
+                log.info("RAISE: %s podbija o +%d -> max_bet=%d, bets=%s",
+                         player.name, action_done.raise_amount, self.max_bet, self.bets)
 
-            perspective.stakes = sum(self.bets)
+        log.info("Koniec licytacji %s: pot=%d, max_bet=%d, bets=%s",
+                 street, sum(self.bets), self.max_bet, self.bets)
 
 
 ==== ./lib\__init__.py ====

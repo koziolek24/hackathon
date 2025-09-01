@@ -1,2 +1,5 @@
 venv/
 .venv/
+skrypt.py
+output.txt
+__pycache__/
